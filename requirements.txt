@@ -1,0 +1,11 @@
+# Modal Labs for secure sandbox execution
+modal
+
+# FastAPI for Modal API server
+fastapi
+uvicorn
+
+# Additional libraries for AI processing
+mcp-use
+modal
+langchain-openai
