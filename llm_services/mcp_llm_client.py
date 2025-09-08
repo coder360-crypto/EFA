@@ -464,7 +464,7 @@ AGENT DETAILS:
 - Agent ID: {self.agent_id[:8]}
 - Session ID: {self.agent_id[:8]}
 
-use tools/list tool for available tools
+{tools_info}
 
 Be helpful and use tools when they would benefit the user's request."""
 
