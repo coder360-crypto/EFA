@@ -476,7 +476,7 @@ async def test_groq_client():
 
             response3 = await client.chat_completion(
                 messages=[{"role": "user", "content": "What's the weather like in New York?"}],
-                model="deepseek-r1-distill-llama-70b",
+                model="llama-3.3-70b-versatile",
                 tools=tools
             )
             print(f"✅ Tools Response: {response3.get('choices', [{}])[0].get('message', {})}")

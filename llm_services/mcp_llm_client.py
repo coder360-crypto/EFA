@@ -18,7 +18,7 @@ from openrouter_client import OpenRouterClient
 from groq_llm_client import GroqClient
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -127,11 +127,11 @@ class MCPClient:
         # Base headers
         headers = {
             "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream"
+            "Accept": "text/event-stream, application/json"
         }
         
-        # Add session header if server is initialized
-        if server.name in self.initialized_servers and server.session_id:
+        # Add session header if we have a session ID (for all requests after initialize)
+        if server.session_id:
             headers["Mcp-Session-Id"] = server.session_id
         
         client = await self._get_client()
@@ -183,18 +183,21 @@ class MCPClient:
             # Extract session ID from response headers or body
             session_id = None
             if method == "initialize":
-                # Check headers first
-                if "mcp-session-id" in response.headers:
-                    session_id = response.headers["mcp-session-id"]
-                # Check response body
-                elif "result" in result and isinstance(result["result"], dict):
+                # Check headers first (case-insensitive)
+                for header_name, header_value in response.headers.items():
+                    if header_name.lower() == "mcp-session-id":
+                        session_id = header_value
+                        break
+                
+                # Check response body as fallback
+                if not session_id and "result" in result and isinstance(result["result"], dict):
                     if "sessionId" in result["result"]:
                         session_id = result["result"]["sessionId"]
                     elif "session_id" in result["result"]:
                         session_id = result["result"]["session_id"]
                 
                 if session_id:
-                    logger.info(f"Received session ID: {session_id}")
+                    logger.info(f"Received session ID from server: {session_id}")
                     return result, session_id
             
             return result
@@ -502,6 +505,8 @@ Be helpful and use tools when they would benefit the user's request."""
             message_resp = choice["message"]
             
             # Handle tool calls
+            
+            print(f"Message response: {message_resp}")
             if message_resp.get("tool_calls"):
                 logger.info(f"LLM requested {len(message_resp['tool_calls'])} tool calls")
                 tool_results = []
@@ -509,9 +514,45 @@ Be helpful and use tools when they would benefit the user's request."""
                 for tool_call in message_resp["tool_calls"]:
                     function = tool_call["function"]
                     function_name = function["name"]
-                    tool_key = function_name.replace("_", ":", 1)
                     
-                    logger.info(f"Calling tool: {tool_key}")
+                    # Convert LLM tool name back to MCP tool key
+                    # LLM receives: ai_agent_tools_list_directory  
+                    # Should convert to: ai_agent_tools:list_directory
+                    tool_key = None
+                    
+                    logger.debug(f"Converting function name: {function_name}")
+                    
+                    # First, try direct lookup (in case it's already correct)
+                    if function_name in self.mcp.available_tools:
+                        tool_key = function_name
+                        logger.debug(f"Direct match found: {tool_key}")
+                    else:
+                        # Try to find the correct tool by matching the function name pattern
+                        logger.debug("Trying pattern matching...")
+                        for available_key in self.mcp.available_tools.keys():
+                            # Convert available key to LLM format for comparison
+                            llm_format = available_key.replace(":", "_")
+                            logger.debug(f"Comparing {function_name} with {llm_format} (from {available_key})")
+                            if llm_format == function_name:
+                                tool_key = available_key
+                                logger.debug(f"Pattern match found: {function_name} -> {tool_key}")
+                                break
+                    
+                    if not tool_key:
+                        # Fallback: try partial matching by tool name
+                        tool_name_part = function_name.split("_")[-1]  # Get last part as tool name
+                        logger.debug(f"Trying partial match with tool name: {tool_name_part}")
+                        possible_tools = [k for k in self.mcp.available_tools.keys() if k.endswith(":" + tool_name_part)]
+                        logger.debug(f"Possible tools: {possible_tools}")
+                        if possible_tools:
+                            tool_key = possible_tools[0]
+                            logger.info(f"Using partial match: {function_name} -> {tool_key}")
+                        else:
+                            logger.error(f"Tool not found: {function_name}")
+                            logger.info(f"Available tools: {list(self.mcp.available_tools.keys())}")
+                            raise Exception(f"Tool not found: {function_name}")
+                    
+                    logger.info(f"Calling tool: {tool_key} (original: {function_name})")
                     
                     try:
                         arguments = json.loads(function["arguments"])
